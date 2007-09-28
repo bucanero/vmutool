@@ -1,6 +1,6 @@
 /********************************************************************
  *	VMU Backup Tool
- *	Version 0.5.3 (24/Jan/2004)
+ *	Version 0.5.4 (25/Jan/2004)
  *	coded by El Bucanero
  *
  *	Copyright (C) 2004 Damián Parrino (bucanero@elitez.com.ar)
@@ -43,11 +43,11 @@
 #define VMU_TO_VMU 4
 #define VMU_FILE_ERASE 5
 
-typedef struct f_list {
+typedef struct list_t {
 	char name[13];
 	ssize_t size;
-	struct f_list *next;
-} f_node;
+	struct list_t *next;
+} node_t;
 
 extern uint8 romdisk[];
 
@@ -57,17 +57,17 @@ KOS_INIT_ROMDISK(romdisk);
 class ListLoader {
 private:
 	char	*srcdir;
-	f_node	*ptr;
+	node_t	*ptr;
 	int		total;
 
 public:
 	ListLoader(char *s) {
 		srcdir=s;
-		ptr=(f_node *)malloc(sizeof(f_node));
-		total=0;
+		ptr=(node_t *)malloc(sizeof(node_t));
+		load();
 	}
 	~ListLoader() {
-		f_node	*aux;
+		node_t	*aux;
 
 		while (ptr != NULL) {
 			aux=ptr->next;
@@ -78,12 +78,9 @@ public:
 	int getTotal() {
 		return(total);
 	}
-	f_node *getListPtr() {
-		return(ptr);
-	}
-	f_node *getListItem(int j) {
+	node_t *getItem(int j) {
 		int i=0;
-		f_node *aux;
+		node_t *aux;
 
 		aux=ptr;
 		while ((aux != NULL) && (i < j)) {
@@ -92,10 +89,10 @@ public:
 		}
 		return(aux);
 	}
-	void loadList() {
+	void load() {
 		file_t		d;
 		dirent_t	*de;
-		f_node		*aux;
+		node_t		*aux;
 
 		total=0;
 		d = fs_open(srcdir, O_RDONLY | O_DIR);
@@ -106,14 +103,14 @@ public:
 			aux=ptr;
 			strcpy(aux->name, "ALL FILES   ");
 			aux->size=0;
-			aux->next=(f_node *)malloc(sizeof(f_node));
+			aux->next=(node_t *)malloc(sizeof(node_t));
 			while ( (de = fs_readdir(d)) ) {
-				if (de->size > 108) {
+				if ((de->size >= 108) && (strstr(de->name, ".VMS") == NULL)) {
 					total++;
 					aux=aux->next;
 					strcpy(aux->name, de->name);
 					aux->size=de->size;
-					aux->next=(f_node *)malloc(sizeof(f_node));
+					aux->next=(node_t *)malloc(sizeof(node_t));
 				}
 			}
 			free(aux->next);
@@ -129,24 +126,16 @@ private:
 	int			pos, top;
 
 	void list_directory() {
-		int		i=0, j, o=FILES_Y * 640 + FILES_X;
-		f_node	*aux;
+		int		i, o=FILES_Y * 640 + FILES_X;
 
 		bfont_set_encoding(BFONT_CODE_ISO8859_1);
-		aux=list->getListPtr();
-		while ((aux != NULL) && (i < top + MAX_FILES_LIST)) {
-			if (i >= top) {
-				bfont_draw_str(vram_s + o, 640, 1, aux->name);
-				o += 640*24;
-			}
-			i++;
-			aux=aux->next;
-		}
-		if (i - top < MAX_FILES_LIST) {
-			for (j=i - top; j < MAX_FILES_LIST; j++) {
+		for (i=top; i < top + MAX_FILES_LIST; i++) {
+			if (i <= list->getTotal()) {
+				bfont_draw_str(vram_s + o, 640, 1, list->getItem(i)->name);
+			} else {
 				bfont_draw_str(vram_s + o, 640, 1, "            ");
-				o += 640*24;
 			}
+			o += 640*24;
 		}
 	}
 	void move_cursor(int *pos, int newpos) {
@@ -162,7 +151,6 @@ public:
 		pos=0;
 		top=0;
 		list=new ListLoader(s);
-		list->loadList();
 	}
 	~ListSelector() {
 		delete(list);
@@ -170,7 +158,7 @@ public:
 	int getSelection() {
 		return(pos);
 	}
-	ListLoader *getListLoader() {
+	ListLoader *getList() {
 		return(list);
 	}
 	int doSelection() {
@@ -292,33 +280,33 @@ private:
 	VmuScaner		*vmuscan;
 	ListSelector	*select;
 
-	void copy_file(char *srcdir, char *dstdir, f_node *ptr) {
+	void copy_file(char *srcdir, char *dstdir, node_t *ptr) {
 		file_t	f;
 		char	*tmpsrc;
 		char	*tmpdst;
+		char	*buf;
 
 		if ((ptr->size > 0) && ((strstr(dstdir, "/vmu/") == NULL) || ((strstr(dstdir, "/vmu/") != NULL) && (vmuscan->getFreeBlocks() >= (int)(ptr->size / 512))))) {
 			tmpsrc=(char *)malloc(64);
 			tmpdst=(char *)malloc(64);
-			if (strstr(ptr->name, ".VMS") == NULL) {
+			if (strstr(ptr->name, ".VMI") == NULL) {
+				sprintf(tmpsrc, "%s/%s", srcdir, ptr->name);
 				sprintf(tmpdst, "%s/%s", dstdir, ptr->name);
 			} else {
-				sprintf(tmpdst, "%s/%.*sVMI", srcdir, strlen(ptr->name)-3, ptr->name);
-				f = fs_open(tmpdst, O_RDONLY);
-				if (!f) {
-					printf("Unable to open %s\n", tmpdst);
-					free(tmpsrc);
-					free(tmpdst);
-					return;
-				} else {
-					fs_seek(f, 0x58, SEEK_SET);
-					fs_read(f, tmpsrc, 13);
-					fs_close(f);
-					printf("Reading %.*sVMI for original file name: %s\n", strlen(ptr->name)-3, ptr->name, tmpsrc);
-					sprintf(tmpdst, "%s/%s", dstdir, tmpsrc);
-				}
+				buf=(char *)malloc(16);
+				sprintf(tmpsrc, "%s/%s", srcdir, ptr->name);
+				f = fs_open(tmpsrc, O_RDONLY);
+				fs_seek(f, 0x50, SEEK_SET);
+				fs_read(f, buf, 8);
+				sprintf(tmpsrc, "%s/%.8s.VMS", srcdir, buf);
+				fs_read(f, buf, 13);
+				sprintf(tmpdst, "%s/%s", dstdir, buf);
+				fs_seek(f, 0x68, SEEK_SET);
+				fs_read(f, &(ptr->size), 4);
+				fs_close(f);
+				printf("Reading %s for original file name: %s\n", ptr->name, buf);
+				free(buf);
 			}
-			sprintf(tmpsrc, "%s/%s", srcdir, ptr->name);
 			printf("Copying (%s -> %s) Name: %s ... ", srcdir, dstdir, ptr->name);
 			if (fs_copy(tmpsrc, tmpdst) == ptr->size) {
 				printf("%d bytes copied.\n", ptr->size);
@@ -330,27 +318,21 @@ private:
 		}
 	}
 	void copy_directory(char *srcdir, char *dstdir) {
-		f_node	*aux;
-		int		i=0;
+		int		i;
 
-		aux=select->getListLoader()->getListPtr();
-		while ((aux != NULL) && (i <= select->getSelection())) {
-			if (select->getSelection() == 0) {
-				copy_file(srcdir, dstdir, aux);
-			} else {
-				if (select->getSelection() == i) {
-					copy_file(srcdir, dstdir, aux);
-				}
-				i++;
+		if (select->getSelection() == 0) {
+			for (i=1; i <= select->getList()->getTotal(); i++) {
+				copy_file(srcdir, dstdir, select->getList()->getItem(i));
 			}
-			aux=aux->next;
+		} else {
+			copy_file(srcdir, dstdir, select->getList()->getItem(select->getSelection()));
 		}
 	}
 	void erase_file(char *srcdir) {
 		char *tmpsrc;
 
 		tmpsrc=(char *)malloc(64);
-		sprintf(tmpsrc, "%s/%s", srcdir, select->getListLoader()->getListItem(select->getSelection())->name);
+		sprintf(tmpsrc, "%s/%s", srcdir, select->getList()->getItem(select->getSelection())->name);
 		printf("Erasing file %s ... ", tmpsrc);
 		if (fs_unlink(tmpsrc) == 0) {
 			printf("Done.\n");
@@ -368,41 +350,41 @@ public:
 	void doAction(int action) {
 		char	*vmudir;
 
-		vmudir=(char *)malloc(32);
+		vmudir=(char *)malloc(10);
 		sprintf(vmudir, "/vmu/%c%d", vmuscan->getVmuPort()+97, vmuscan->getVmuSlot()+1);
 		switch (action) {
 			case VMU_TO_PC:
 				select=new ListSelector(vmudir);
-				if ((select->getListLoader()->getTotal() > 0) && (select->doSelection() != -1)) {
+				if ((select->getList()->getTotal() > 0) && (select->doSelection() != -1)) {
 					copy_directory(vmudir, PC_DIR);
 				}
 				delete(select);
 				break;
 			case PC_TO_VMU:
 				select=new ListSelector(PC_DIR);
-				if ((select->getListLoader()->getTotal() > 0) && (select->doSelection() != -1)) {
+				if ((select->getList()->getTotal() > 0) && (select->doSelection() != -1)) {
 					copy_directory(PC_DIR, vmudir);
 				}
 				delete(select);
 				break;
 			case CD_TO_VMU:
 				select=new ListSelector(CD_DIR);
-				if ((select->getListLoader()->getTotal() > 0) && (select->doSelection() != -1)) {
+				if ((select->getList()->getTotal() > 0) && (select->doSelection() != -1)) {
 					copy_directory(CD_DIR, vmudir);
 				}
 				delete(select);
 				break;
 			case VMU_TO_VMU:
 				select=new ListSelector(vmudir);
-				if ((select->getListLoader()->getTotal() > 0) && (select->doSelection() != -1)) {
+				if ((select->getList()->getTotal() > 0) && (select->doSelection() != -1)) {
 					copy_directory(vmudir, DEFAULT_VMU);
 				}
 				delete(select);
 				break;
 			case VMU_FILE_ERASE:
 				select=new ListSelector(vmudir);
-				if ((select->getListLoader()->getTotal() > 0) && (select->doSelection() > 0)) {
-						erase_file(vmudir);
+				if ((select->getList()->getTotal() > 0) && (select->doSelection() > 0)) {
+					erase_file(vmudir);
 				}
 				delete(select);
 				break;

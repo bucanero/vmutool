@@ -1,6 +1,6 @@
 /********************************************************************
  * VMU Backup Tool
- * Version 0.0.1 (01/Jan/2004)
+ * Version 0.0.2 (05/Jan/2004)
  * coded by El Bucanero
  *
  * Copyright (C) 2004 Damián Parrino (bucanero@elitez.com.ar)
@@ -25,6 +25,12 @@
 #define VMU_Y 148
 #define VMU_W 84
 #define VMU_H 112
+#define PC_DIR "/pc/vmutool"
+
+void scan_vmu_dir(int vmuport, int vmuslot, RefPtr<Label> label);
+void copy_vmu_file(char *srcdir, char *dstdir, char *vmufile, ssize_t size);
+void copy_vmu_dir(int vmuport, int vmuslot);
+void copy_pc_dir(int vmuport, int vmuslot);
 
 extern uint8 romdisk[];
 
@@ -61,7 +67,26 @@ void copy_vmu_dir(int vmuport, int vmuslot) {
 		printf("Can't open VMU (%s)\n", vmudir);
 	} else {
 		while ( (de = fs_readdir(d)) ) {
-			copy_vmu_file(vmudir, "/pc", de->name, de->size);				
+			copy_vmu_file(vmudir, PC_DIR, de->name, de->size);
+		}
+	}
+	fs_close(d);
+	free(vmudir);
+}
+
+void copy_pc_dir(int vmuport, int vmuslot) {
+	file_t		d;
+	dirent_t	*de;
+	char		*vmudir;
+	
+	vmudir=(char *)malloc(10);
+	sprintf(vmudir, "/vmu/%c%d", vmuport+97, vmuslot+1);
+	d = fs_open(PC_DIR, O_RDONLY | O_DIR);
+	if (!d) {
+		printf("Can't open PC (%s)\n", PC_DIR);
+	} else {
+		while ( (de = fs_readdir(d)) ) {
+			copy_vmu_file(PC_DIR, vmudir, de->name, de->size);
 		}
 	}
 	fs_close(d);
@@ -168,6 +193,11 @@ int main(int argc, char **argv) {
 			}
 			if ((t->buttons & CONT_A) && (timer + 200 < timer_ms_gettime64())) {
 				copy_vmu_dir(x, y);
+				scan_vmu_dir(x, y, lbl1);
+				timer = timer_ms_gettime64();
+			}
+			if ((t->buttons & CONT_B) && (timer + 200 < timer_ms_gettime64())) {
+				copy_pc_dir(x, y);
 				scan_vmu_dir(x, y, lbl1);
 				timer = timer_ms_gettime64();
 			}

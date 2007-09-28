@@ -40,3 +40,7 @@ dist:
 	rm -f $(OBJS) romdisk.o romdisk.img
 	$(KOS_STRIP) $(TARGET)
 
+scramble:
+	$(KOS_OBJCOPY) -O binary $(TARGET) temp.bin
+	/cross/dc/sh-elf/bin/scramble temp.bin vmutool.bin
+	rm -f temp.bin

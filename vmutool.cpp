@@ -1,6 +1,6 @@
 /********************************************************************
  * VMU Backup Tool
- * Version 0.0.2 (05/Jan/2004)
+ * Version 0.5.beta (08/Jan/2004)
  * coded by El Bucanero
  *
  * Copyright (C) 2004 Damián Parrino (bucanero@elitez.com.ar)
@@ -21,21 +21,177 @@
 #include <tsu/drawables/banner.h>
 #include <tsu/drawables/label.h>
 
+// GUI constants
 #define VMU_X 236
 #define VMU_Y 148
 #define VMU_W 84
 #define VMU_H 112
+#define MAX_FILES_LIST 14
+#define FILES_X 240
+#define FILES_Y 80
+#define FILES_W 172
+
+// Default paths
 #define PC_DIR "/pc/vmutool"
+#define CD_DIR "/cd/vmutool"
+#define DEFAULT_VMU "/vmu/a1"
+
+// Defined actions
+#define VMU_TO_PC 1
+#define PC_TO_VMU 2
+#define CD_TO_VMU 3
+#define VMU_TO_VMU 4
 
 void scan_vmu_dir(int vmuport, int vmuslot, RefPtr<Label> label);
 void copy_vmu_file(char *srcdir, char *dstdir, char *vmufile, ssize_t size);
-void copy_vmu_dir(int vmuport, int vmuslot);
-void copy_pc_dir(int vmuport, int vmuslot);
+void copy_directory(char *srcdir, char *dstdir, int selection);
+void backup_action(int vmuport, int vmuslot, int action);
+int list_directory(char *srcdir, int begin);
+int file_select(char *srcdir);
 
 extern uint8 romdisk[];
 
 KOS_INIT_FLAGS(INIT_DEFAULT | INIT_MALLOCSTATS);
 KOS_INIT_ROMDISK(romdisk);
+
+void backup_action(int vmuport, int vmuslot, int action) {
+	int		selection;
+	char	*vmudir;
+
+	vmudir=(char *)malloc(10);
+	sprintf(vmudir, "/vmu/%c%d", vmuport+97, vmuslot+1);
+	switch (action) {
+		case VMU_TO_PC:
+			selection=file_select(vmudir);
+			if (selection != -1) {
+				copy_directory(vmudir, PC_DIR, selection);
+			}
+			break;
+		case PC_TO_VMU:
+			selection=file_select(PC_DIR);
+			if (selection != -1) {
+				copy_directory(PC_DIR, vmudir, selection);
+			}
+			break;
+		case CD_TO_VMU:
+			selection=file_select(CD_DIR);
+			if (selection != -1) {
+				copy_directory(CD_DIR, vmudir, selection);
+			}
+			break;
+		case VMU_TO_VMU:
+			selection=file_select(vmudir);
+			if (selection != -1) {
+				copy_directory(vmudir, DEFAULT_VMU, selection);
+			}
+			break;
+	}
+	free(vmudir);
+}
+
+int file_select(char *srcdir) {
+	int		pos=-1, done=0, top=-1, total, o;
+	uint64	timer = timer_ms_gettime64();
+
+	total=list_directory(srcdir, top);
+	o = FILES_Y * 640 + FILES_X - 20;
+	bfont_set_encoding(BFONT_CODE_ISO8859_1);
+	bfont_draw_str(vram_s + o, 640, 1, ">");
+	bfont_draw_str(vram_s + o + FILES_W, 640, 1, "<");
+	while (!done) {
+		MAPLE_FOREACH_BEGIN(MAPLE_FUNC_CONTROLLER, cont_state_t, t)
+			if ((t->buttons & CONT_DPAD_UP) && (pos >= top) && (timer + 200 < timer_ms_gettime64())) {
+				if (pos > top) {
+					pos--;
+					bfont_draw_str(vram_s + o, 640, 1, " ");
+					bfont_draw_str(vram_s + o + FILES_W, 640, 1, " ");
+					o -= 640*24;
+					bfont_draw_str(vram_s + o, 640, 1, ">");
+					bfont_draw_str(vram_s + o + FILES_W, 640, 1, "<");
+				} else {
+					if ((pos == top) && (top != -1)) {
+						top=top - MAX_FILES_LIST;
+						pos--;
+						bfont_draw_str(vram_s + o, 640, 1, " ");
+						bfont_draw_str(vram_s + o + FILES_W, 640, 1, " ");
+						list_directory(srcdir, top);
+						o = FILES_Y * 640 + FILES_X - 20 + 640 * 24 * (MAX_FILES_LIST - 1);
+						bfont_draw_str(vram_s + o, 640, 1, ">");
+						bfont_draw_str(vram_s + o + FILES_W, 640, 1, "<");
+					}
+				}
+				timer = timer_ms_gettime64();
+			}
+			if ((t->buttons & CONT_DPAD_DOWN) && (pos <= top + MAX_FILES_LIST) && (timer + 200 < timer_ms_gettime64())) {
+				if ((pos < top + MAX_FILES_LIST - 1) && (pos < total)) {
+					pos++;
+					bfont_draw_str(vram_s + o, 640, 1, " ");
+					bfont_draw_str(vram_s + o + FILES_W, 640, 1, " ");
+					o += 640*24;
+					bfont_draw_str(vram_s + o, 640, 1, ">");
+					bfont_draw_str(vram_s + o + FILES_W, 640, 1, "<");
+				} else {
+					if ((pos == top + MAX_FILES_LIST - 1) && (top + MAX_FILES_LIST - 1 < total)) {
+						top=top + MAX_FILES_LIST;
+						pos++;
+						bfont_draw_str(vram_s + o, 640, 1, " ");
+						bfont_draw_str(vram_s + o + FILES_W, 640, 1, " ");
+						list_directory(srcdir, top);
+						o = FILES_Y * 640 + FILES_X - 20;
+						bfont_draw_str(vram_s + o, 640, 1, ">");
+						bfont_draw_str(vram_s + o + FILES_W, 640, 1, "<");
+					}
+				}
+				timer = timer_ms_gettime64();
+			}
+			if ((t->buttons & CONT_A) && (timer + 200 < timer_ms_gettime64())) {
+				done=1;
+				timer = timer_ms_gettime64();
+			}
+			if ((t->buttons & CONT_B) && (timer + 200 < timer_ms_gettime64())) {
+				done=1;
+				pos=-1;
+				timer = timer_ms_gettime64();
+			}
+		MAPLE_FOREACH_END()
+	}
+	return(pos);
+}
+
+int list_directory(char *srcdir, int begin) {
+	file_t		d;
+	dirent_t	*de;
+	int			i=0, j, o;
+
+	o = FILES_Y * 640 + FILES_X;
+	bfont_set_encoding(BFONT_CODE_ISO8859_1);
+	d = fs_open(srcdir, O_RDONLY | O_DIR);
+	if (!d) {
+		printf("Can't open source directory (%s)\n", srcdir);
+	} else {
+		if (begin == -1) {
+			bfont_draw_str(vram_s + o, 640, 1, "CANCEL      ");
+			o += 640*24;
+			bfont_draw_str(vram_s + o, 640, 1, "ALL FILES   ");
+			o += 640*24;
+		}
+		while ( (de = fs_readdir(d)) ) {
+			i++;
+			if ((i >= begin) && (i < begin + MAX_FILES_LIST)) {
+				bfont_draw_str(vram_s + o, 640, 1, de->name);
+				o += 640*24;
+			}
+		}
+		if (i - begin + 1 < MAX_FILES_LIST) {
+			for (j=i - begin + 1; j < MAX_FILES_LIST; j++) {
+				bfont_draw_str(vram_s + o, 640, 1, "            ");
+				o += 640*24;
+			}
+		}
+	}
+	fs_close(d);
+	return(i);
+}
 
 void copy_vmu_file(char *srcdir, char *dstdir, char *vmufile, ssize_t size) {
 	char	*tmpsrc;
@@ -55,42 +211,27 @@ void copy_vmu_file(char *srcdir, char *dstdir, char *vmufile, ssize_t size) {
 	free(tmpdst);
 }
 
-void copy_vmu_dir(int vmuport, int vmuslot) {
+void copy_directory(char *srcdir, char *dstdir, int selection) {
 	file_t		d;
 	dirent_t	*de;
-	char		*vmudir;
-	
-	vmudir=(char *)malloc(10);
-	sprintf(vmudir, "/vmu/%c%d", vmuport+97, vmuslot+1);
-	d = fs_open(vmudir, O_RDONLY | O_DIR);
-	if (!d) {
-		printf("Can't open VMU (%s)\n", vmudir);
-	} else {
-		while ( (de = fs_readdir(d)) ) {
-			copy_vmu_file(vmudir, PC_DIR, de->name, de->size);
-		}
-	}
-	fs_close(d);
-	free(vmudir);
-}
+	int			i=0;
 
-void copy_pc_dir(int vmuport, int vmuslot) {
-	file_t		d;
-	dirent_t	*de;
-	char		*vmudir;
-	
-	vmudir=(char *)malloc(10);
-	sprintf(vmudir, "/vmu/%c%d", vmuport+97, vmuslot+1);
-	d = fs_open(PC_DIR, O_RDONLY | O_DIR);
+	d = fs_open(srcdir, O_RDONLY | O_DIR);
 	if (!d) {
-		printf("Can't open PC (%s)\n", PC_DIR);
+		printf("Can't open source directory (%s)\n", srcdir);
 	} else {
 		while ( (de = fs_readdir(d)) ) {
-			copy_vmu_file(PC_DIR, vmudir, de->name, de->size);
+			if (selection == 0) {
+				copy_vmu_file(srcdir, dstdir, de->name, de->size);
+			} else {
+				i++;
+				if (selection == i) {
+					copy_vmu_file(srcdir, dstdir, de->name, de->size);
+				}
+			}
 		}
 	}
 	fs_close(d);
-	free(vmudir);
 }
 
 void scan_vmu_dir(int vmuport, int vmuslot, RefPtr<Label> label) {
@@ -130,24 +271,22 @@ int main(int argc, char **argv) {
 
 	pvr_init_defaults();
 
-	// Setup a scene and place a banner in it
 	RefPtr<Scene> sc = new Scene();
 	RefPtr<Banner> b_menu = new Banner(PVR_LIST_TR_POLY, new Texture("/rd/vmumenu.png", true));
 	RefPtr<Banner> b_vmu = new Banner(PVR_LIST_TR_POLY, new Texture("/rd/vmu.png", true));
+	RefPtr<Banner> b_file = new Banner(PVR_LIST_TR_POLY, new Texture("/rd/fileselect.png", true));
 
 	sc->subAdd(b_menu);
 	sc->subAdd(b_vmu);
+	sc->subAdd(b_file);
 	b_menu->setTranslate(Vector(320, 240, 5));
 	b_vmu->setTranslate(Vector(VMU_X + x*VMU_W, VMU_Y + y*VMU_H, 7));
+	b_file->setTranslate(Vector(800, 600, 11));
 
 	RefPtr<Font> fnt = new Font("/rd/helvetica.txf");
-	RefPtr<Label> lbl1 = new Label(fnt, "VMU Backup Tool v0.0.1", 20, true, true);
-	lbl1->setTranslate(Vector(320, 390, 20));
+	RefPtr<Label> lbl1 = new Label(fnt, "VMU Backup Tool", 20, true, true);
+	lbl1->setTranslate(Vector(320, 420, 9));
 	sc->subAdd(lbl1);
-
-	RefPtr<Label> lbl2 = new Label(fnt, "Select a VMU to backup and press A", 20, true, true);
-	lbl2->setTranslate(Vector(320, 420, 20));
-	sc->subAdd(lbl2);
 
 	pvr_set_bg_color(1.0f, 1.0f, 1.0f);
 
@@ -192,12 +331,74 @@ int main(int argc, char **argv) {
 				timer = timer_ms_gettime64();
 			}
 			if ((t->buttons & CONT_A) && (timer + 200 < timer_ms_gettime64())) {
-				copy_vmu_dir(x, y);
+				b_file->setTranslate(Vector(320, 240, 11));
+				timer = timer_ms_gettime64();
+				while (timer + 50 > timer_ms_gettime64()) {
+					pvr_wait_ready();
+					pvr_scene_begin();
+					pvr_list_begin(PVR_LIST_OP_POLY);
+					sc->draw(PVR_LIST_OP_POLY);
+					pvr_list_begin(PVR_LIST_TR_POLY);
+					sc->draw(PVR_LIST_TR_POLY);
+					pvr_scene_finish();
+					sc->nextFrame();
+				}
+				backup_action(x, y, VMU_TO_PC);
+				b_file->setTranslate(Vector(800, 600, 11));
 				scan_vmu_dir(x, y, lbl1);
 				timer = timer_ms_gettime64();
 			}
 			if ((t->buttons & CONT_B) && (timer + 200 < timer_ms_gettime64())) {
-				copy_pc_dir(x, y);
+				b_file->setTranslate(Vector(320, 240, 11));
+				timer = timer_ms_gettime64();
+				while (timer + 50 > timer_ms_gettime64()) {
+					pvr_wait_ready();
+					pvr_scene_begin();
+					pvr_list_begin(PVR_LIST_OP_POLY);
+					sc->draw(PVR_LIST_OP_POLY);
+					pvr_list_begin(PVR_LIST_TR_POLY);
+					sc->draw(PVR_LIST_TR_POLY);
+					pvr_scene_finish();
+					sc->nextFrame();
+				}
+				backup_action(x, y, PC_TO_VMU);
+				b_file->setTranslate(Vector(800, 600, 11));
+				scan_vmu_dir(x, y, lbl1);
+				timer = timer_ms_gettime64();
+			}
+			if ((t->buttons & CONT_X) && (timer + 200 < timer_ms_gettime64())) {
+				b_file->setTranslate(Vector(320, 240, 11));
+				timer = timer_ms_gettime64();
+				while (timer + 50 > timer_ms_gettime64()) {
+					pvr_wait_ready();
+					pvr_scene_begin();
+					pvr_list_begin(PVR_LIST_OP_POLY);
+					sc->draw(PVR_LIST_OP_POLY);
+					pvr_list_begin(PVR_LIST_TR_POLY);
+					sc->draw(PVR_LIST_TR_POLY);
+					pvr_scene_finish();
+					sc->nextFrame();
+				}
+				backup_action(x, y, CD_TO_VMU);
+				b_file->setTranslate(Vector(800, 600, 11));
+				scan_vmu_dir(x, y, lbl1);
+				timer = timer_ms_gettime64();
+			}
+			if ((t->buttons & CONT_Y) && (timer + 200 < timer_ms_gettime64())) {
+				b_file->setTranslate(Vector(320, 240, 11));
+				timer = timer_ms_gettime64();
+				while (timer + 50 > timer_ms_gettime64()) {
+					pvr_wait_ready();
+					pvr_scene_begin();
+					pvr_list_begin(PVR_LIST_OP_POLY);
+					sc->draw(PVR_LIST_OP_POLY);
+					pvr_list_begin(PVR_LIST_TR_POLY);
+					sc->draw(PVR_LIST_TR_POLY);
+					pvr_scene_finish();
+					sc->nextFrame();
+				}
+				backup_action(x, y, VMU_TO_VMU);
+				b_file->setTranslate(Vector(800, 600, 11));
 				scan_vmu_dir(x, y, lbl1);
 				timer = timer_ms_gettime64();
 			}

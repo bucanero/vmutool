@@ -1,3 +1,4 @@
+# $Id$
 #
 # Basic KallistiOS skeleton / test program
 # (c)2001 Dan Potter
